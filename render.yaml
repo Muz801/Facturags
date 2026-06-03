@@ -1,0 +1,58 @@
+# Configuracion de despliegue en Render (backend Express)
+# Render leera este archivo si haces "New > Blueprint" apuntando al repo.
+
+services:
+  - type: web
+    name: facturapos-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      # Define estas variables en el panel de Render (Environment):
+      - key: CLIENT_URL
+        sync: false        # ej: https://tu-sitio.netlify.app
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        sync: false        # exactamente 32 caracteres
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: HACIENDA_SANDBOX_TOKEN_URL
+        value: https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token
+      - key: HACIENDA_SANDBOX_RECEPCION_URL
+        value: https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/
+      - key: HACIENDA_PROD_TOKEN_URL
+        value: https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token
+      - key: HACIENDA_PROD_RECEPCION_URL
+        value: https://api.comprobanteselectronicos.go.cr/recepcion/v1/
+      - key: HACIENDA_SANDBOX_CLIENT_ID
+        value: api-stag
+      - key: HACIENDA_PROD_CLIENT_ID
+        value: api-prod

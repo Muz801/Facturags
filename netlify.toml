@@ -1,0 +1,16 @@
+# Configuracion de despliegue en Netlify (frontend)
+# Conecta este repo en Netlify y apunta el "base directory" a client/
+
+[build]
+  base = "client"
+  command = "npm run build"
+  publish = "client/build"
+
+# Redireccion SPA: todas las rutas sirven index.html (React Router las maneja)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Variable de entorno necesaria en Netlify (configurar en el panel):
+#   REACT_APP_API_URL = https://TU-BACKEND.onrender.com/api

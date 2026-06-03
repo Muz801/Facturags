@@ -1,0 +1,30 @@
+# Dependencias
+node_modules/
+*/node_modules/
+
+# Variables de entorno (NUNCA subir secretos)
+.env
+*/.env
+.env.local
+.env.*.local
+
+# Builds
+build/
+dist/
+*/build/
+*/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / SO
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Llaves criptograficas (por si alguien las deja en el repo por error)
+*.p12
+*.pfx
+*.key
