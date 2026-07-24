@@ -54,6 +54,10 @@ CREATE TABLE config_hacienda (
   consecutivo_fe    INT NOT NULL DEFAULT 1,                 -- proximo consecutivo factura electronica
   consecutivo_te    INT NOT NULL DEFAULT 1,                 -- proximo consecutivo tiquete electronico
   consecutivo_nc    INT NOT NULL DEFAULT 1,                 -- proximo consecutivo nota credito
+  consecutivo_nd    INT NOT NULL DEFAULT 1,                 -- nota de debito
+  consecutivo_fec   INT NOT NULL DEFAULT 1,                 -- factura electronica de compra (tipo 08)
+  consecutivo_mr    INT NOT NULL DEFAULT 1,                 -- mensaje receptor (tipos 05/06/07)
+  consecutivo_rep   INT NOT NULL DEFAULT 1,                 -- recibo electronico de pago (tipo 10)
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -206,9 +210,22 @@ CREATE TABLE compras (
   total         DECIMAL(12,2) NOT NULL DEFAULT 0,
   estado        VARCHAR(20) NOT NULL DEFAULT 'recibida', -- recibida | pendiente | anulada
   notas         VARCHAR(255) DEFAULT '',
+  -- Condicion del proveedor: define si el negocio tiene que emitir la
+  -- factura electronica de compra (tipo 08) por esta compra.
+  proveedor_condicion VARCHAR(20) NOT NULL DEFAULT 'inscrito', -- inscrito | simplificado | no_domiciliado | no_contribuyente
+  requiere_fec  TINYINT(1) NOT NULL DEFAULT 0,
+  comprobante_recibido_id INT NULL,
+  -- Factura electronica de compra emitida por el negocio
+  fe_clave      VARCHAR(50) DEFAULT '',
+  fe_consecutivo VARCHAR(20) DEFAULT '',
+  fe_estado     VARCHAR(20) DEFAULT '',  -- pendiente | generado | enviado | aceptado | rechazado | error
+  fe_xml        LONGTEXT,
+  fe_respuesta  LONGTEXT,
+  fe_enviado_at DATETIME NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (proveedor_id) REFERENCES proveedores(id) ON DELETE SET NULL,
-  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL,
+  INDEX idx_compra_fe_estado (fe_estado)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS compra_items;
@@ -220,6 +237,12 @@ CREATE TABLE compra_items (
   cantidad     DECIMAL(12,2) NOT NULL DEFAULT 1,
   costo_unit   DECIMAL(12,2) NOT NULL DEFAULT 0,
   total_linea  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  -- Datos que exige el XML v4.4 y el calculo del IVA acreditable
+  codigo_cabys  VARCHAR(13) DEFAULT '',
+  unidad_medida VARCHAR(15) NOT NULL DEFAULT 'Unid',
+  descuento     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  tarifa_iva    DECIMAL(5,2) NOT NULL DEFAULT 13.00,
+  iva_monto     DECIMAL(12,2) NOT NULL DEFAULT 0,
   FOREIGN KEY (compra_id) REFERENCES compras(id) ON DELETE CASCADE,
   FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -236,10 +259,63 @@ CREATE TABLE gastos (
   proveedor_id INT,
   usuario_id   INT,
   notas        VARCHAR(255) DEFAULT '',
+  -- Respaldo fiscal: sin comprobante electronico aceptado no hay credito de IVA
+  comprobante_recibido_id INT NULL,
+  subtotal     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  iva_monto    DECIMAL(12,2) NOT NULL DEFAULT 0,
+  iva_acreditable TINYINT(1) NOT NULL DEFAULT 0,
+  codigo_cabys VARCHAR(13) DEFAULT '',
+  clave_comprobante VARCHAR(50) DEFAULT '',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (proveedor_id) REFERENCES proveedores(id) ON DELETE SET NULL,
   FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL,
-  INDEX idx_gasto_fecha (fecha)
+  INDEX idx_gasto_fecha (fecha),
+  INDEX idx_gasto_comprobante (comprobante_recibido_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---- Buzon de comprobantes recibidos ----
+-- Las facturas que le hacen AL negocio. Cada una hay que responderla ante
+-- Hacienda con un Mensaje Receptor antes del 8vo dia habil del mes siguiente.
+DROP TABLE IF EXISTS comprobantes_recibidos;
+CREATE TABLE comprobantes_recibidos (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  clave                 VARCHAR(50) NOT NULL,
+  tipo_documento        VARCHAR(2)  NOT NULL DEFAULT '01',
+  numero_consecutivo    VARCHAR(20) DEFAULT '',
+  emisor_nombre         VARCHAR(160) DEFAULT '',
+  emisor_identificacion VARCHAR(20)  DEFAULT '',
+  emisor_email          VARCHAR(120) DEFAULT '',
+  receptor_identificacion VARCHAR(20) DEFAULT '',
+  fecha_emision         DATETIME NULL,
+  moneda                VARCHAR(3) NOT NULL DEFAULT 'CRC',
+  tipo_cambio           DECIMAL(14,5) NOT NULL DEFAULT 1,
+  total_gravado         DECIMAL(14,5) NOT NULL DEFAULT 0,
+  total_exento          DECIMAL(14,5) NOT NULL DEFAULT 0,
+  total_descuentos      DECIMAL(14,5) NOT NULL DEFAULT 0,
+  total_impuesto        DECIMAL(14,5) NOT NULL DEFAULT 0,
+  total_comprobante     DECIMAL(14,5) NOT NULL DEFAULT 0,
+  -- Respuesta del receptor
+  estado            VARCHAR(20) NOT NULL DEFAULT 'pendiente', -- pendiente | aceptado | aceptado_parcial | rechazado
+  mensaje           TINYINT NULL,          -- 1 acepta, 2 acepta parcial, 3 rechaza
+  detalle_mensaje   VARCHAR(160) DEFAULT '',
+  monto_iva_acreditar DECIMAL(14,5) NOT NULL DEFAULT 0,
+  consecutivo_receptor VARCHAR(20) DEFAULT '',
+  mr_xml            LONGTEXT,
+  mr_estado         VARCHAR(20) DEFAULT '',
+  mr_respuesta      LONGTEXT,
+  mr_enviado_at     DATETIME NULL,
+  fecha_limite      DATE NULL,
+  -- Trazabilidad
+  xml_original      LONGTEXT NOT NULL,
+  archivo_nombre    VARCHAR(200) DEFAULT '',
+  compra_id         INT NULL,
+  gasto_id          INT NULL,
+  usuario_id        INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_clave (clave),
+  INDEX idx_recibido_estado (estado),
+  INDEX idx_recibido_fecha (fecha_emision)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---- Movimientos de inventario (auditoria de stock) ----

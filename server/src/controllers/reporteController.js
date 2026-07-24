@@ -132,3 +132,102 @@ export const iva = asyncHandler(async (req, res) => {
   ], rows.map((r) => ({ ...r, base_gravada: colones(r.base_gravada), iva_cobrado: colones(r.iva_cobrado), total_facturado: colones(r.total_facturado) })));
   enviarCsv(res, `resumen_iva_${desde || 'inicio'}_${hasta || 'hoy'}`, csv);
 });
+
+// ---- Libro de compras: los comprobantes recibidos y como se respondieron ----
+// Es el respaldo del IVA soportado. Un comprobante sin Mensaje Receptor
+// aceptado NO da derecho a credito, por eso va la columna de estado.
+export const libroCompras = asyncHandler(async (req, res) => {
+  const { desde, hasta } = req.query;
+  const rows = await query(`
+    SELECT r.fecha_emision, r.emisor_identificacion, r.emisor_nombre,
+           r.tipo_documento, r.numero_consecutivo, r.clave,
+           r.total_gravado, r.total_exento, r.total_impuesto, r.total_comprobante,
+           r.estado, r.monto_iva_acreditar, r.consecutivo_receptor,
+           r.mr_estado, r.fecha_limite
+      FROM comprobantes_recibidos r
+     WHERE (:desde IS NULL OR r.fecha_emision >= :desde)
+       AND (:hasta IS NULL OR r.fecha_emision <= :hasta)
+     ORDER BY r.fecha_emision
+  `, { desde: desde ? desde + ' 00:00:00' : null, hasta: hasta ? hasta + ' 23:59:59' : null });
+
+  const csv = toCsv([
+    { key: 'fecha_emision', label: 'Fecha emision' },
+    { key: 'emisor_identificacion', label: 'Cedula proveedor' },
+    { key: 'emisor_nombre', label: 'Proveedor' },
+    { key: 'tipo_documento', label: 'Tipo doc' },
+    { key: 'numero_consecutivo', label: 'Consecutivo' },
+    { key: 'clave', label: 'Clave Hacienda' },
+    { key: 'total_gravado', label: 'Gravado (CRC)' },
+    { key: 'total_exento', label: 'Exento (CRC)' },
+    { key: 'total_impuesto', label: 'IVA facturado (CRC)' },
+    { key: 'total_comprobante', label: 'Total (CRC)' },
+    { key: 'estado', label: 'Respuesta' },
+    { key: 'monto_iva_acreditar', label: 'IVA acreditado (CRC)' },
+    { key: 'consecutivo_receptor', label: 'Consecutivo receptor' },
+    { key: 'mr_estado', label: 'Estado en Hacienda' },
+    { key: 'fecha_limite', label: 'Fecha limite' },
+  ], rows.map((r) => ({
+    ...r,
+    total_gravado: colones(r.total_gravado),
+    total_exento: colones(r.total_exento),
+    total_impuesto: colones(r.total_impuesto),
+    total_comprobante: colones(r.total_comprobante),
+    monto_iva_acreditar: colones(r.monto_iva_acreditar),
+  })));
+  enviarCsv(res, `libro_compras_${desde || 'inicio'}_${hasta || 'hoy'}`, csv);
+});
+
+// ---- IVA del periodo: repercutido contra soportado ----
+// Es el numero que se lleva a la declaracion. Solo suma el IVA de
+// comprobantes efectivamente aceptados ante Hacienda.
+export const ivaPeriodo = asyncHandler(async (req, res) => {
+  const { desde, hasta } = req.query;
+  const rango = {
+    desde: desde ? desde + ' 00:00:00' : null,
+    hasta: hasta ? hasta + ' 23:59:59' : null,
+  };
+
+  const [ventas] = await query(`
+    SELECT COALESCE(SUM(v.subtotal - v.descuento),0) AS base, COALESCE(SUM(v.impuesto),0) AS iva,
+           COUNT(*) AS documentos
+      FROM ventas v
+     WHERE v.estado='completada'
+       AND (:desde IS NULL OR v.fecha >= :desde) AND (:hasta IS NULL OR v.fecha <= :hasta)
+  `, rango);
+
+  const [recibidos] = await query(`
+    SELECT COALESCE(SUM(monto_iva_acreditar),0) AS iva_acreditable,
+           COALESCE(SUM(total_impuesto),0) AS iva_facturado,
+           COUNT(*) AS documentos,
+           SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) AS sin_responder
+      FROM comprobantes_recibidos
+     WHERE (:desde IS NULL OR fecha_emision >= :desde) AND (:hasta IS NULL OR fecha_emision <= :hasta)
+  `, rango);
+
+  // Las compras con factura electronica de compra tambien dan credito
+  const [fec] = await query(`
+    SELECT COALESCE(SUM(impuesto),0) AS iva, COUNT(*) AS documentos
+      FROM compras
+     WHERE requiere_fec = 1 AND estado <> 'anulada' AND fe_estado IN ('enviado','aceptado')
+       AND (:desde IS NULL OR fecha >= :desde) AND (:hasta IS NULL OR fecha <= :hasta)
+  `, rango);
+
+  const soportado = Number(recibidos.iva_acreditable) + Number(fec.iva);
+  const filas = [
+    { concepto: 'IVA repercutido (ventas)', documentos: ventas.documentos, monto: colones(ventas.iva) },
+    { concepto: 'IVA soportado - comprobantes de proveedores aceptados', documentos: recibidos.documentos, monto: colones(recibidos.iva_acreditable) },
+    { concepto: 'IVA soportado - facturas electronicas de compra', documentos: fec.documentos, monto: colones(fec.iva) },
+    { concepto: 'Total IVA soportado acreditable', documentos: '', monto: colones(soportado) },
+    { concepto: 'Diferencia a pagar (o a favor si es negativa)', documentos: '', monto: colones(Number(ventas.iva) - soportado) },
+    { concepto: '', documentos: '', monto: '' },
+    { concepto: 'REVISAR: IVA facturado por proveedores que NO se esta acreditando', documentos: '', monto: colones(Number(recibidos.iva_facturado) - Number(recibidos.iva_acreditable)) },
+    { concepto: 'REVISAR: comprobantes recibidos sin responder a Hacienda', documentos: recibidos.sin_responder, monto: '' },
+  ];
+
+  const csv = toCsv([
+    { key: 'concepto', label: 'Concepto' },
+    { key: 'documentos', label: 'Documentos' },
+    { key: 'monto', label: 'Monto (CRC)' },
+  ], filas);
+  enviarCsv(res, `iva_periodo_${desde || 'inicio'}_${hasta || 'hoy'}`, csv);
+});

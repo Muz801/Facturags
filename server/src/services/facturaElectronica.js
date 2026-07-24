@@ -2,6 +2,7 @@ import { create } from 'xmlbuilder2';
 import config from '../config/index.js';
 import { query } from '../config/db.js';
 import { decrypt } from '../utils/crypto.js';
+import { fechaISOCostaRica, partesFechaCR } from '../utils/fechas.js';
 
 // ============================================================
 //  Servicio de Factura Electronica Costa Rica v4.4
@@ -20,21 +21,26 @@ import { decrypt } from '../utils/crypto.js';
 // ============================================================
 
 // Tipos de documento (codigo de 2 digitos dentro de la clave)
-const TIPO_DOC = {
+export const TIPO_DOC = {
   factura_electronica: '01',
   nota_debito: '02',
   nota_credito: '03',
   tiquete_electronico: '04',
+  // Respuestas del receptor
+  confirmacion_aceptacion: '05',
+  confirmacion_aceptacion_parcial: '06',
+  rechazo: '07',
+  // Documentos que emite el comprador / exportador (v4.4)
+  factura_compra: '08',
+  factura_exportacion: '09',
+  recibo_pago: '10',
 };
 
 // ---- Clave numerica de 50 digitos ----
 // Estructura: pais(3) + dia(2) mes(2) anio(2) + cedula(12) + consecutivo(20)
 //             + situacion(1) + codigoSeguridad(8)
 export function generarClave({ cedula, consecutivo, situacion = '1' }) {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, '0');
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const yy = String(now.getFullYear()).slice(-2);
+  const { dd, mm, yy } = partesFechaCR();
   const pais = '506';
   const ced = String(cedula || '').replace(/\D/g, '').padStart(12, '0').slice(-12);
   const cons = String(consecutivo).padStart(20, '0');
@@ -53,7 +59,7 @@ export function generarConsecutivo({ sucursal, terminal, tipoDoc, numero }) {
 
 // ---- Construccion del XML v4.4 ----
 export function construirXML({ empresa, cliente, items, totales, clave, consecutivo, tipo, condicionVenta, metodoPago }) {
-  const ahora = new Date().toISOString();
+  const ahora = fechaISOCostaRica();
   const esTiquete = tipo === 'tiquete_electronico';
   const rootName = esTiquete ? 'TiqueteElectronico' : 'FacturaElectronica';
   const ns = esTiquete

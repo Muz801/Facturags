@@ -13,6 +13,7 @@ const NAV = [
   { to: '/clientes', label: 'Clientes', icon: 'clientes' },
   { to: '/proveedores', label: 'Proveedores', icon: 'proveedores' },
   { to: '/compras', label: 'Compras', icon: 'compras' },
+  { to: '/recibidos', label: 'Recibidos', icon: 'recibidos' },
   { to: '/gastos', label: 'Gastos', icon: 'gastos' },
   { to: '/empleados', label: 'Empleados', icon: 'empleados', soloGerente: true },
   { to: '/reportes', label: 'Descargables', icon: 'reportes' },

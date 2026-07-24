@@ -1,6 +1,12 @@
 import { query } from '../config/db.js';
 import { asyncHandler, ok, fail } from '../utils/http.js';
 import { encrypt } from '../utils/crypto.js';
+import { revisarDatosFiscales } from '../services/validacionFiscal.js';
+
+// ---- Revision previa: que falta para poder facturar de verdad ----
+export const revisionFiscal = asyncHandler(async (req, res) => {
+  return ok(res, await revisarDatosFiscales());
+});
 
 // ---- Datos del comercio (editables, NADA quemado) ----
 export const getEmpresa = asyncHandler(async (req, res) => {

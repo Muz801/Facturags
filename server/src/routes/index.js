@@ -13,10 +13,13 @@ import * as compraCtrl from '../controllers/compraController.js';
 import * as ventaCtrl from '../controllers/ventaController.js';
 import * as dashCtrl from '../controllers/dashboardController.js';
 import * as repCtrl from '../controllers/reporteController.js';
+import * as recibidosCtrl from '../controllers/comprobanteRecibidoController.js';
 
 const router = Router();
 // multer en memoria para la llave .p12 (max 1MB)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
+// Los XML de proveedores son mas pesados y pueden venir en lote dentro de un ZIP
+const uploadXml = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 50 } });
 
 // ---- Auth (publico) ----
 router.post('/auth/login', authCtrl.login);
@@ -33,6 +36,7 @@ router.put('/empresa', requireRole('admin', 'gerente'), empresaCtrl.updateEmpres
 router.get('/empresa/hacienda', requireRole('admin', 'gerente'), empresaCtrl.getConfigHacienda);
 router.put('/empresa/hacienda', requireRole('admin', 'gerente'), empresaCtrl.updateConfigHacienda);
 router.post('/empresa/hacienda/llave', requireRole('admin', 'gerente'), upload.single('llave'), empresaCtrl.subirLlave);
+router.get('/empresa/hacienda/revision', requireRole('admin', 'gerente'), empresaCtrl.revisionFiscal);
 
 // ---- Categorias ----
 router.get('/categorias', catCtrl.listar);
@@ -80,6 +84,20 @@ router.get('/compras', compraCtrl.listar);
 router.get('/compras/:id', compraCtrl.obtener);
 router.post('/compras', compraCtrl.crear);
 router.post('/compras/:id/anular', compraCtrl.anular);
+// Factura electronica de compra (proveedores de regimen simplificado / no inscritos)
+router.post('/compras/:id/fec', requireRole('admin', 'gerente'), compraCtrl.reenviarFEC);
+router.get('/compras/:id/fec/estado', compraCtrl.consultarFEC);
+router.get('/compras/:id/xml', compraCtrl.descargarXml);
+
+// ---- Buzon de comprobantes recibidos (compras y gastos que le facturan al negocio) ----
+router.get('/recibidos', recibidosCtrl.listar);
+router.get('/recibidos/resumen', recibidosCtrl.resumen);
+router.get('/recibidos/:id', recibidosCtrl.obtener);
+router.get('/recibidos/:id/xml', recibidosCtrl.descargarXml);
+router.post('/recibidos', uploadXml.array('archivos', 50), recibidosCtrl.subir);
+router.post('/recibidos/:id/responder', requireRole('admin', 'gerente'), recibidosCtrl.responder);
+router.get('/recibidos/:id/estado', recibidosCtrl.consultarEstado);
+router.post('/recibidos/:id/gasto', recibidosCtrl.registrarComoGasto);
 
 // ---- Ventas (POS) ----
 router.get('/ventas', ventaCtrl.listar);
@@ -98,5 +116,7 @@ router.get('/reportes/inventario', repCtrl.inventario);
 router.get('/reportes/gastos', repCtrl.gastos);
 router.get('/reportes/compras', repCtrl.compras);
 router.get('/reportes/iva', repCtrl.iva);
+router.get('/reportes/libro-compras', repCtrl.libroCompras);
+router.get('/reportes/iva-periodo', repCtrl.ivaPeriodo);
 
 export default router;

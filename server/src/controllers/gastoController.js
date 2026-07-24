@@ -53,6 +53,10 @@ export const actualizar = asyncHandler(async (req, res) => {
 });
 
 export const eliminar = asyncHandler(async (req, res) => {
+  // Si el gasto venia de un comprobante del buzon, hay que soltar el enlace:
+  // si no, el comprobante queda apuntando a un gasto que ya no existe y nunca
+  // se podria volver a registrar.
+  await query('UPDATE comprobantes_recibidos SET gasto_id = NULL WHERE gasto_id = :id', { id: req.params.id });
   await query('DELETE FROM gastos WHERE id = :id', { id: req.params.id });
   return ok(res, { mensaje: 'Gasto eliminado' });
 });

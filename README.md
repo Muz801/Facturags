@@ -27,14 +27,15 @@ Construido con **React (Create React App)** (frontend) y **Express + MySQL** (ba
 - **Punto de venta (POS):** catálogo por categorías, carrito, cobro, cálculo de IVA, vuelto, y comprobante con QR.
 - **Inventario:** productos y categorías editables, crear categorías nuevas al vuelo, ajuste de stock con historial de movimientos, alertas de stock bajo.
 - **Ventas:** historial con filtros, detalle, anulación con devolución de stock, reimpresión.
-- **Compras:** entrada de mercadería que sube el stock automáticamente.
-- **Gastos:** registro de egresos por categoría.
+- **Compras:** entrada de mercadería que sube el stock automáticamente, con IVA soportado por línea y emisión de **factura electrónica de compra** cuando el proveedor no factura.
+- **Gastos:** registro de egresos por categoría, con su respaldo electrónico y el IVA acreditable.
+- **Comprobantes recibidos:** buzón de las facturas de proveedores, con aceptación / aceptación parcial / rechazo ante Hacienda (**Mensaje Receptor**) y control del plazo de 8 días hábiles.
 - **Clientes y proveedores:** CRUD completo.
 - **Empleados:** usuarios con roles (admin / gerente / cajero).
 - **Dashboard:** ventas del día y del mes, utilidad, gráficos, top de productos, métodos de pago, stock bajo.
-- **Descargables:** reportes en Excel/CSV (ventas, inventario, gastos, compras y resumen de IVA para el D-104).
+- **Descargables:** reportes en Excel/CSV (ventas, inventario, gastos, compras, resumen de IVA, **libro de compras** e **IVA del período**).
 - **Comprobantes por correo:** envío del ticket con QR y enlace.
-- **Factura electrónica v4.4:** generación de clave, consecutivo y XML; configuración por negocio desde Ajustes; ambiente sandbox o producción.
+- **Factura electrónica v4.4:** clave, consecutivo, XML, **firma XAdES-EPES** y transmisión a Hacienda; configuración por negocio desde Ajustes; ambientes simulación / sandbox / producción.
 - **Configuración total en la app:** datos del comercio, apariencia (tema) y credenciales de Hacienda. Nada está fijo en el código.
 
 ---
@@ -206,22 +207,63 @@ A partir de ahí, en el POS puedes elegir el tipo de comprobante: *Ticket* (inte
 
 ## Firma digital
 
-La generación de la **clave de 50 dígitos**, el **consecutivo** y el **XML v4.4** ya están implementados (`server/src/services/facturaElectronica.js`). El **único paso** que falta para enviar a Hacienda en producción es **firmar el XML con el formato XAdES-EPES** usando la llave `.p12`.
+La firma **XAdES-EPES** está implementada en `server/src/services/firma.js` (basada en `xadesjs` + `node-forge`). Firma con la llave `.p12` del contribuyente y aplica el perfil que exige Hacienda:
 
-Por qué se deja marcado y no resuelto automáticamente: la firma XAdES de Costa Rica requiere una librería especializada y el manejo del certificado del contribuyente. El punto exacto de integración está señalado en el código con el comentario:
+- Enveloped, RSASSA-PKCS1-v1_5 con SHA-256
+- `SignerRole` declarado como `ObligadoTributario`
+- `SignaturePolicyIdentifier` apuntando a la resolución vigente
 
+La política de firma es **configurable por variable de entorno** (`HACIENDA_POLITICA_FIRMA_URL`, `_ALG`, `_DIGEST`), porque Hacienda valida el digest contra el documento oficial y ese valor cambia cuando publican una resolución nueva. **Confirmá los valores contra el anexo técnico v4.4 vigente antes de pasar a producción.**
+
+Todo lo que se transmite pasa por el mismo camino (`server/src/services/haciendaEnvio.js`): firmar → pedir token → `POST /recepcion`. Aplica a facturas, tiquetes, notas, facturas de compra y mensajes receptor.
+
+---
+
+## Compras y gastos ante Hacienda
+
+Reportar lo que se **compra** es tan obligatorio como reportar lo que se vende, y son dos mecanismos distintos:
+
+### 1. Buzón de comprobantes recibidos (Mensaje Receptor)
+
+Cuando un proveedor inscrito factura, manda su XML. El negocio debe responderle a Hacienda con un **Mensaje Receptor**: aceptación (1), aceptación parcial (2) o rechazo (3).
+
+- Los XML entran por **Recibidos → Subir XML o ZIP** (uno, varios, o un ZIP completo).
+- El sistema valida que el comprobante venga a nombre del negocio, que no esté repetido y que traiga firma.
+- El plazo es hasta el **8vo día hábil del mes siguiente** al de la emisión. La columna *Plazo* lo muestra en semáforo y las filas vencidas salen en rojo.
+- **Si el plazo vence, ese IVA ya no se puede acreditar** y no hay forma de recuperarlo.
+
+### 2. Factura Electrónica de Compra (tipo 08)
+
+Cuando el proveedor **no** está obligado a facturar electrónicamente (régimen simplificado, no inscritos, no domiciliados, no contribuyentes), el comprobante lo emite el propio negocio.
+
+En **Compras → Nueva compra** se elige la *condición del proveedor*. Si no es "inscrito", al guardar se genera la factura de compra, se firma y se transmite. Ojo con los papeles invertidos: el emisor es el negocio y el receptor es el proveedor.
+
+### Reportes que salen de esto
+
+- **Libro de compras** — cada comprobante recibido con su respuesta, consecutivo receptor y estado en Hacienda.
+- **IVA del período** — IVA repercutido contra IVA soportado, contando **solo** lo efectivamente aceptado. Incluye una línea de aviso con el IVA que se está dejando sin acreditar.
+
+---
+
+## Probar sin credenciales de Hacienda
+
+Para ejercitar el circuito completo antes de tener la llave real y el usuario de sandbox:
+
+```bash
+cd server
+npm run llave:prueba      # genera un .p12 autofirmado (PIN 1234)
+npm run simulador         # levanta un Hacienda falso en el puerto 4100
 ```
-// ====== PUNTO DE FIRMA DIGITAL (XAdES-EPES con la llave .p12) ======
-```
 
-dentro de `server/src/controllers/ventaController.js` (función `emitirFE`). Ahí encontrarás el bloque de envío real ya escrito y comentado: al implementar `firmarXML(...)` y descomentarlo, el sistema empezará a enviar a Hacienda.
+Luego, en **Configuración → Factura Electrónica**: subí la llave de prueba, poné el PIN, y elegí el ambiente **"Simulación local"**.
 
-**Opciones recomendadas para la firma:**
+Con eso el sistema firma de verdad, transmite de verdad y consulta el estado de verdad — solo que contra el simulador. Sirve para validar la aplicación de punta a punta.
 
-- Una librería de firma XAdES para Node (por ejemplo basada en `xml-crypto` / `xadesjs` adaptada al esquema de Hacienda CR).
-- Un microservicio de firma (varios proyectos open source de factura electrónica CR exponen un firmador).
+> ⚠️ La llave de prueba es autofirmada: **Hacienda la rechaza**. Para producción hay que usar la que entrega el MICITT. El simulador **no valida contra los esquemas XSD oficiales**: sirve para probar la aplicación, no para certificar el XML.
 
-**Qué funciona sin la firma (modo sandbox/demo):** generación completa de clave, consecutivo y XML, almacenamiento en la venta, QR e impresión. Es suficiente para demos de extremo a extremo y para validar el XML antes de firmar.
+### Revisión antes de producción
+
+**Configuración → Factura Electrónica → Revisar ahora** corre una lista de verificación y dice qué falta: cédula, código de actividad, ubicación en **códigos numéricos** (el error más común: Hacienda quiere `1`/`01`/`01`, no "San José"/"Central"/"Carmen"), vigencia del certificado, y productos sin CAByS válido.
 
 ---
 

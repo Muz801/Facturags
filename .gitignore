@@ -22,6 +22,7 @@ npm-debug.log*
 .DS_Store
 .vscode/
 .idea/
+.claude/
 *.swp
 
 # Llaves criptograficas (por si alguien las deja en el repo por error)

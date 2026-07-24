@@ -122,6 +122,8 @@ export default function Gastos() {
                 <th>Descripcion</th>
                 <th>Categoria</th>
                 <th>Pago</th>
+                <th>Respaldo</th>
+                <th className="text-right">IVA acred.</th>
                 <th className="text-right">Monto</th>
                 <th></th>
               </tr>
@@ -144,6 +146,25 @@ export default function Gastos() {
                   </td>
                   <td className="muted" style={{ textTransform: "capitalize" }}>
                     {g.metodo_pago}
+                  </td>
+                  {/* Un gasto sin comprobante electronico no da derecho a
+                      credito de IVA: hay que verlo de un vistazo. */}
+                  <td>
+                    {g.comprobante_recibido_id ? (
+                      <span
+                        style={{ color: "var(--success, #16a34a)", fontSize: 13, fontWeight: 600 }}
+                        title={g.clave_comprobante}
+                      >
+                        Comprobante electronico
+                      </span>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 13 }}>
+                        Sin comprobante
+                      </span>
+                    )}
+                  </td>
+                  <td className="text-right mono">
+                    {Number(g.iva_monto) > 0 ? crc(g.iva_monto) : <span className="muted">—</span>}
                   </td>
                   <td className="text-right mono" style={{ fontWeight: 600 }}>
                     {crc(g.monto)}

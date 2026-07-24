@@ -8,21 +8,31 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "migrate": "node scripts/migrate.js",
+    "migrate:fiscal": "node scripts/migrate-fiscal.js",
+    "simulador": "node scripts/hacienda-simulador.js",
+    "llave:prueba": "node scripts/generar-llave-prueba.js",
     "seed": "node scripts/seed.js",
-    "reset": "node scripts/migrate.js && node scripts/seed.js"
+    "reset": "node scripts/migrate.js && node scripts/seed.js && node scripts/migrate-fiscal.js"
   },
   "dependencies": {
+    "@peculiar/webcrypto": "^1.7.1",
+    "@xmldom/xmldom": "^0.8.13",
+    "adm-zip": "^0.6.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "fast-xml-parser": "^5.10.1",
+    "haciendacostarica-signer": "^1.0.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
     "mysql2": "^3.11.0",
+    "node-forge": "^1.4.0",
     "nodemailer": "^6.9.14",
     "qrcode": "^1.5.4",
     "uuid": "^10.0.0",
-    "xmlbuilder2": "^3.1.1"
+    "xmlbuilder2": "^3.1.1",
+    "xpath": "^0.0.34"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"

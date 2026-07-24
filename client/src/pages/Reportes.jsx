@@ -8,6 +8,8 @@ import { Icon } from '../components/Icons.jsx';
 const REPORTES = [
   { id: 'ventas', titulo: 'Ventas', desc: 'Detalle de todas las ventas con IVA y clave de Hacienda', conFechas: true, icon: 'ventas' },
   { id: 'iva', titulo: 'Resumen de IVA (D-104)', desc: 'Base gravada e IVA cobrado por dia, para la declaracion', conFechas: true, icon: 'reportes' },
+  { id: 'iva-periodo', titulo: 'IVA del periodo', desc: 'IVA cobrado contra IVA acreditable: el numero que va a la declaracion', conFechas: true, icon: 'reportes' },
+  { id: 'libro-compras', titulo: 'Libro de compras', desc: 'Comprobantes de proveedores con su respuesta ante Hacienda', conFechas: true, icon: 'recibidos' },
   { id: 'inventario', titulo: 'Inventario', desc: 'Existencias actuales, costos y valor del inventario', conFechas: false, icon: 'inventario' },
   { id: 'gastos', titulo: 'Gastos', desc: 'Egresos por categoria y metodo de pago', conFechas: true, icon: 'gastos' },
   { id: 'compras', titulo: 'Compras', desc: 'Compras a proveedores', conFechas: false, icon: 'compras' },

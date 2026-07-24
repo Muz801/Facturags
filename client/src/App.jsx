@@ -9,6 +9,7 @@ import Inventario from './pages/Inventario.jsx';
 import Clientes from './pages/Clientes.jsx';
 import Proveedores from './pages/Proveedores.jsx';
 import Compras from './pages/Compras.jsx';
+import Recibidos from './pages/Recibidos.jsx';
 import Gastos from './pages/Gastos.jsx';
 import Empleados from './pages/Empleados.jsx';
 import Reportes from './pages/Reportes.jsx';
@@ -40,6 +41,7 @@ export default function App() {
                 <Route path="/clientes" element={<Clientes />} />
                 <Route path="/proveedores" element={<Proveedores />} />
                 <Route path="/compras" element={<Compras />} />
+                <Route path="/recibidos" element={<Recibidos />} />
                 <Route path="/gastos" element={<Gastos />} />
                 <Route path="/empleados" element={<Empleados />} />
                 <Route path="/reportes" element={<Reportes />} />

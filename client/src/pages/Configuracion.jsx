@@ -12,6 +12,64 @@ const TABS = [
   { id: 'hacienda', label: 'Factura Electronica' },
 ];
 
+// Revision previa: Hacienda rechaza el comprobante entero por un campo mal
+// puesto y avisa en diferido. Mejor ver la lista antes de pasar a produccion.
+function RevisionFiscal() {
+  const [rev, setRev] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+
+  const revisar = () => {
+    setRev('cargando');
+    api.get('/empresa/hacienda/revision')
+      .then((r) => { setRev(r.data.data); setAbierto(true); })
+      .catch(() => setRev(null));
+  };
+
+  const color = rev && rev !== 'cargando'
+    ? (rev.listo_para_produccion ? 'var(--success, #16a34a)' : 'var(--danger)')
+    : 'var(--border)';
+
+  return (
+    <div style={{ padding: 14, borderRadius: 'var(--radius-sm)', border: `1px solid ${color}`, marginBottom: 18 }}>
+      <div className="flex items-center justify-between" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontWeight: 600 }}>Revision antes de facturar</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Verifica cedula, ubicacion en codigos, actividad, llave y codigos CAByS.
+          </div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={revisar} disabled={rev === 'cargando'}>
+          {rev === 'cargando' ? 'Revisando...' : 'Revisar ahora'}
+        </button>
+      </div>
+
+      {abierto && rev && rev !== 'cargando' && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 700, color, marginBottom: 8 }}>
+            {rev.listo_para_produccion
+              ? 'Todo listo para facturar en produccion'
+              : `${rev.graves} problema(s) que impiden facturar`}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {rev.hallazgos.map((h, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, fontSize: 13 }}>
+                <span style={{ color: h.grave ? 'var(--danger)' : '#d97706', fontWeight: 700 }}>
+                  {h.grave ? '✗' : '!'}
+                </span>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{h.campo}</div>
+                  <div>{h.mensaje}</div>
+                  <div className="muted">{h.como_resolver}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Configuracion() {
   const toast = useToast();
   const { theme, setTheme } = useTheme();
@@ -146,12 +204,16 @@ export default function Configuracion() {
             Cada negocio sube aqui su propia llave y credenciales. Todo se guarda cifrado. Mientras este desactivada, las ventas se registran como comprobantes internos.
           </p>
 
+          <RevisionFiscal />
+
+
           {/* Ambiente */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 6 }}>
             <div className="field">
               <label>Ambiente</label>
               <select className="select" value={hac.ambiente || 'sandbox'} onChange={(e) => setHac({ ...hac, ambiente: e.target.value })}>
-                <option value="sandbox">Pruebas (Sandbox)</option>
+                <option value="simulacion">Simulacion local (sin Hacienda)</option>
+                <option value="sandbox">Pruebas (Sandbox de Hacienda)</option>
                 <option value="prod">Produccion</option>
               </select>
             </div>

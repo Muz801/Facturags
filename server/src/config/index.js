@@ -48,6 +48,18 @@ const config = {
   },
 
   hacienda: {
+    // Politica de firma que se declara en el nodo SignaturePolicyIdentifier.
+    // OJO: Hacienda valida el digest contra el documento oficial. Si publican
+    // una politica nueva, se cambia aqui por variable de entorno sin tocar codigo.
+    politicaFirma: {
+      url:
+        process.env.HACIENDA_POLITICA_FIRMA_URL ||
+        "https://www.hacienda.go.cr/ATV/ComprobanteElectronico/docs/esquemas/2016/v4.3/Resolucion_Comprobantes_Electronicos_DGT-R-48-2016.pdf",
+      algoritmo: process.env.HACIENDA_POLITICA_FIRMA_ALG || "SHA-1",
+      digest:
+        process.env.HACIENDA_POLITICA_FIRMA_DIGEST ||
+        "V8lVVNGDCPen6VELRD1Ja8HARFk=",
+    },
     sandbox: {
       tokenUrl: process.env.HACIENDA_SANDBOX_TOKEN_URL,
       recepcionUrl: process.env.HACIENDA_SANDBOX_RECEPCION_URL,
@@ -57,6 +69,15 @@ const config = {
       tokenUrl: process.env.HACIENDA_PROD_TOKEN_URL,
       recepcionUrl: process.env.HACIENDA_PROD_RECEPCION_URL,
       clientId: process.env.HACIENDA_PROD_CLIENT_ID || "api-prod",
+    },
+    // Simulador local (npm run simulador). Sirve para probar el circuito
+    // completo -firma, envio, consulta- sin credenciales de Hacienda.
+    simulacion: {
+      tokenUrl:
+        process.env.HACIENDA_SIM_TOKEN_URL || "http://localhost:4100/token",
+      recepcionUrl:
+        process.env.HACIENDA_SIM_RECEPCION_URL || "http://localhost:4100/",
+      clientId: "api-sim",
     },
   },
 };
