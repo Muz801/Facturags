@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api from '../api/client.js';
+import api, { descargarReporte } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { crc, fechaHora, hoy } from '../utils/format.js';
@@ -8,6 +8,10 @@ import { Icon } from '../components/Icons.jsx';
 import ComprobanteView from '../components/ComprobanteView.jsx';
 
 const TIPO_LABEL = { ticket: 'Ticket', tiquete_electronico: 'Tiquete E.', factura_electronica: 'Factura E.' };
+
+// Estado del comprobante ante Hacienda. Solo aplica a factura/tiquete electronico.
+const FE_COLOR = { aceptado: 'var(--success, #16a34a)', enviado: '#d97706', generado: '#d97706', rechazado: 'var(--danger)', error: 'var(--danger)' };
+const FE_LABEL = { aceptado: 'Aceptada', enviado: 'Enviada', generado: 'Sin enviar', rechazado: 'Rechazada', error: 'Error', inactiva: 'FE apagada' };
 
 export default function Ventas() {
   const { esGerente } = useAuth();
@@ -38,6 +42,22 @@ export default function Ventas() {
     } catch (err) { toast.error(err.response?.data?.message || 'Error'); }
   };
 
+  const esElectronica = (v) => v.tipo_comprobante === 'factura_electronica' || v.tipo_comprobante === 'tiquete_electronico';
+
+  const descargarXml = async (v) => {
+    try { await descargarReporte(`/ventas/${v.id}/xml`, `${v.fe_clave || v.numero}.xml`); }
+    catch { toast.error('Esta venta no tiene XML generado'); }
+  };
+
+  const reenviar = async (v) => {
+    try {
+      const { data } = await api.post(`/ventas/${v.id}/fe`);
+      if (data.data.estado === 'enviado') toast.success('Enviada a Hacienda');
+      else toast.error(data.data.respuesta || `Quedo en estado ${data.data.estado}`);
+      cargar();
+    } catch (err) { toast.error(err.response?.data?.message || 'No se pudo enviar'); }
+  };
+
   return (
     <div>
       <PageHeader title="Ventas" subtitle="Historial de transacciones" />
@@ -53,7 +73,7 @@ export default function Ventas() {
       ) : (
         <div className="card table-wrap">
           <table className="data">
-            <thead><tr><th>Numero</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th className="text-right">Total</th><th className="text-center">Estado</th><th></th></tr></thead>
+            <thead><tr><th>Numero</th><th>Fecha</th><th>Cliente</th><th>Tipo</th><th className="text-right">Total</th><th className="text-center">Estado</th><th>Hacienda</th><th></th></tr></thead>
             <tbody>
               {ventas.map((v) => (
                 <tr key={v.id}>
@@ -68,7 +88,20 @@ export default function Ventas() {
                       : <span className="badge badge-success">Completada</span>}
                   </td>
                   <td>
+                    {esElectronica(v)
+                      ? <span style={{ color: FE_COLOR[v.fe_estado] || 'var(--text-soft)', fontWeight: 600, fontSize: 13 }}>
+                          {FE_LABEL[v.fe_estado] || v.fe_estado || '—'}
+                        </span>
+                      : <span className="muted" style={{ fontSize: 12 }}>No aplica</span>}
+                  </td>
+                  <td>
                     <div className="flex gap-sm" style={{ justifyContent: 'flex-end' }}>
+                      {esElectronica(v) && v.fe_xml && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => descargarXml(v)} title="Descargar XML"><Icon.download width={15} height={15} /></button>
+                      )}
+                      {esGerente && esElectronica(v) && ['generado', 'error', 'rechazado'].includes(v.fe_estado) && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => reenviar(v)} title="Reintentar envio a Hacienda">Reenviar</button>
+                      )}
                       <button className="btn btn-ghost btn-sm" onClick={() => verDetalle(v)} title="Ver"><Icon.print width={15} height={15} /></button>
                       {esGerente && v.estado !== 'anulada' && (
                         <button className="btn btn-sm" style={{ color: 'var(--danger)' }} onClick={() => anular(v)} title="Anular"><Icon.close width={15} height={15} /></button>

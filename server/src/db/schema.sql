@@ -169,9 +169,10 @@ CREATE TABLE ventas (
   -- Datos de factura electronica (si aplica)
   fe_clave        VARCHAR(54) DEFAULT '',
   fe_consecutivo  VARCHAR(20) DEFAULT '',
-  fe_estado       VARCHAR(20) DEFAULT '',  -- pendiente | aceptado | rechazado | error
+  fe_estado       VARCHAR(20) DEFAULT '',  -- generado | enviado | aceptado | rechazado | error
   fe_xml          LONGTEXT,
   fe_respuesta    LONGTEXT,
+  fe_enviado_at   DATETIME NULL,
   notas           VARCHAR(255) DEFAULT '',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL,

@@ -202,6 +202,7 @@ export const subir = asyncHandler(async (req, res) => {
         emisor: datos.emisor_nombre,
         total: datos.total_comprobante,
         sin_firma: !datos.firmado,
+        sin_receptor: datos.sin_receptor,
       });
     } catch (err) {
       resultados.push({ archivo: a.nombre, ok: false, motivo: err.message });
@@ -236,6 +237,17 @@ export const responder = asyncHandler(async (req, res) => {
       `Este comprobante ya se respondio como "${comprobante.estado}". Para rectificar hay que confirmarlo explicitamente.`,
       409,
       { requiere_confirmacion: true, estado_actual: comprobante.estado }
+    );
+  }
+
+  // Un comprobante que no identifica receptor (tipico del tiquete) no respalda
+  // credito de IVA: responderlo seria acreditarse algo que no corresponde.
+  if (!comprobante.receptor_identificacion && codigo !== 3) {
+    return fail(
+      res,
+      'Este comprobante no identifica al receptor, asi que no da derecho a credito de IVA. ' +
+      'Pidale al proveedor una factura electronica a nombre del negocio.',
+      409
     );
   }
 
@@ -298,6 +310,8 @@ export const responder = asyncHandler(async (req, res) => {
     return fail(res, `No se pudo enviar a Hacienda: ${err.message}`, 502);
   }
 
+  // Guarda el Mensaje Receptor FIRMADO: es el que tiene valor ante Hacienda
+  const mrFirmado = Buffer.from(resultado.xmlFirmado, 'base64').toString('utf8');
   await query(
     `UPDATE comprobantes_recibidos
         SET estado = :estado, mensaje = :mensaje, detalle_mensaje = :detalle,
@@ -310,7 +324,7 @@ export const responder = asyncHandler(async (req, res) => {
       detalle: String(detalle || '').slice(0, 160),
       iva: ivaAcreditar,
       cons: consecutivoReceptor,
-      xml,
+      xml: mrFirmado,
       mrEstado: resultado.estado,
       resp: resultado.respuesta,
       id: comprobante.id,

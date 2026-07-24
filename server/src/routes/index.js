@@ -106,6 +106,9 @@ router.post('/ventas', ventaCtrl.crear);
 router.post('/ventas/:id/anular', requireRole('admin', 'gerente'), ventaCtrl.anular);
 router.get('/ventas/:id/qr', ventaCtrl.generarQR);
 router.post('/ventas/:id/correo', ventaCtrl.enviarPorCorreo);
+router.post('/ventas/:id/fe', requireRole('admin', 'gerente'), ventaCtrl.reenviarFE);
+router.get('/ventas/:id/fe/estado', ventaCtrl.consultarEstadoFE);
+router.get('/ventas/:id/xml', ventaCtrl.descargarXml);
 
 // ---- Dashboard ----
 router.get('/dashboard', dashCtrl.resumen);

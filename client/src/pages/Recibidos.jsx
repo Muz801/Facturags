@@ -284,7 +284,8 @@ export default function Recibidos() {
                     <div style={{ fontWeight: 600 }}>{r.archivo}</div>
                     <div className="muted">
                       {r.ok ? `${r.emisor} — ${crc(r.total)}` : r.motivo}
-                      {r.sin_firma && ' (ojo: el XML no trae firma digital)'}
+                      {r.sin_firma && ' · ojo: el XML no trae firma digital'}
+                      {r.sin_receptor && ' · no identifica receptor: no da credito de IVA'}
                     </div>
                   </div>
                 </div>

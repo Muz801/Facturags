@@ -38,8 +38,25 @@ const parser = new XMLParser({
 });
 
 const num = (v) => {
-  const n = Number(v);
+  const n = Number(String(v ?? '').replace(/,/g, ''));
   return Number.isFinite(n) ? n : 0;
+};
+
+// Un nodo que puede venir una vez o repetido: el parser devuelve objeto o array.
+const comoLista = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+// Suma un campo a lo largo de nodos repetidos. Una linea puede traer varios
+// <Impuesto> (IVA mas un especifico) o varios <Descuento>; quedarse con el
+// primero subdeclara el monto.
+const sumar = (nodos, campo) => comoLista(nodos).reduce((s, n) => s + num(n?.[campo]), 0);
+
+// Primer valor que no venga vacio. Los tiquetes suelen omitir TotalGravado
+// y solo traer TotalVentaNeta.
+const primero = (...valores) => {
+  for (const v of valores) {
+    if (v !== undefined && v !== null && String(v) !== '') return num(v);
+  }
+  return 0;
 };
 
 /**
@@ -76,6 +93,11 @@ export function parsearComprobante(xml) {
   // El XML del proveedor viene firmado: si no trae firma, no es valido ante Hacienda
   const firmado = /<(\w+:)?Signature[\s>]/.test(xml);
 
+  // Un tiquete electronico no identifica al receptor, asi que no respalda
+  // credito de IVA: para acreditar hay que pedirle al proveedor una factura.
+  const receptorId = String(doc.Receptor?.Identificacion?.Numero || '').trim();
+  const sinReceptor = !receptorId;
+
   return {
     clave,
     tipo_documento: RAIZ_A_TIPO[raiz],
@@ -83,34 +105,42 @@ export function parsearComprobante(xml) {
     emisor_nombre: String(emisor.Nombre || '').slice(0, 160),
     emisor_identificacion: String(emisor.Identificacion?.Numero || '').trim(),
     emisor_email: String(emisor.CorreoElectronico || '').slice(0, 120),
-    receptor_identificacion: String(receptor.Identificacion?.Numero || '').trim(),
+    receptor_identificacion: receptorId,
+    sin_receptor: sinReceptor,
     fecha_emision: aFechaMySQL(doc.FechaEmision),
     moneda: String(resumen.CodigoTipoMoneda?.CodigoMoneda || 'CRC'),
     tipo_cambio: num(resumen.CodigoTipoMoneda?.TipoCambio) || 1,
-    total_gravado: num(resumen.TotalGravado),
+    // Los totales se toman del XML tal cual: el documento fiscal es el que manda.
+    total_gravado: primero(resumen.TotalGravado, resumen.TotalVentaNeta, resumen.TotalVenta),
     total_exento: num(resumen.TotalExento),
     total_descuentos: num(resumen.TotalDescuentos),
     total_impuesto: num(resumen.TotalImpuesto),
-    total_comprobante: num(resumen.TotalComprobante),
+    total_comprobante: primero(
+      resumen.TotalComprobante,
+      num(resumen.TotalVentaNeta) + num(resumen.TotalImpuesto)
+    ),
     firmado,
     lineas: normalizarLineas(doc.DetalleServicio?.LineaDetalle),
   };
 }
 
 function normalizarLineas(lineas) {
-  if (!lineas) return [];
-  const arr = Array.isArray(lineas) ? lineas : [lineas];
-  return arr.map((l) => ({
-    nombre: String(l.Detalle || '').slice(0, 180),
-    codigo_cabys: String(l.CodigoCABYS || ''),
-    cantidad: num(l.Cantidad),
-    unidad_medida: String(l.UnidadMedida || 'Unid'),
-    costo_unit: num(l.PrecioUnitario),
-    descuento: num(l.Descuento?.MontoDescuento),
-    iva_monto: num(l.Impuesto?.Monto),
-    tarifa_iva: num(l.Impuesto?.Tarifa),
-    total_linea: num(l.MontoTotalLinea),
-  }));
+  return comoLista(lineas).map((l) => {
+    const impuestos = comoLista(l.Impuesto);
+    return {
+      nombre: String(l.Detalle || 'Sin detalle').slice(0, 180),
+      codigo_cabys: String(l.CodigoCABYS || l.Codigo || ''),
+      cantidad: num(l.Cantidad) || 1,
+      unidad_medida: String(l.UnidadMedida || 'Unid'),
+      costo_unit: num(l.PrecioUnitario),
+      descuento: sumar(l.Descuento, 'MontoDescuento'),
+      iva_monto: sumar(l.Impuesto, 'Monto'),
+      // La tarifa que se muestra es la del primer impuesto (normalmente el IVA);
+      // el monto si suma todos.
+      tarifa_iva: impuestos.length ? num(impuestos[0].Tarifa) : 0,
+      total_linea: num(l.MontoTotalLinea),
+    };
+  });
 }
 
 // Hacienda manda la fecha en ISO8601 con zona horaria (2026-07-23T14:05:00-06:00).

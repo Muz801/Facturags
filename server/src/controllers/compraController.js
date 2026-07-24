@@ -176,8 +176,10 @@ async function emitirFacturaCompra(compraId, { metodo_pago } = {}) {
         numeroIdentificacion: String(proveedor.identificacion).replace(/\D/g, ''),
       },
     });
-    await query('UPDATE compras SET fe_estado = :est, fe_respuesta = :resp, fe_enviado_at = NOW() WHERE id = :id', {
-      est: r.estado, resp: r.respuesta, id: compraId,
+    // Guarda el XML firmado: es el documento con valor legal
+    const xmlFirmado = Buffer.from(r.xmlFirmado, 'base64').toString('utf8');
+    await query('UPDATE compras SET fe_estado = :est, fe_respuesta = :resp, fe_xml = :xml, fe_enviado_at = NOW() WHERE id = :id', {
+      est: r.estado, resp: r.respuesta, xml: xmlFirmado, id: compraId,
     });
     return { estado: r.estado, clave, consecutivo, http_status: r.httpStatus, respuesta: r.respuesta };
   } catch (err) {

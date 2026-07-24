@@ -28,6 +28,10 @@ export const ESTADO_POR_MENSAJE = {
   3: 'rechazado',
 };
 
+// Con que derecho a credito se toma el IVA soportado.
+// 01 generales (credito pleno) | 02 credito parcial | 04 sin derecho a credito
+const CONDICION_IMPUESTO = { 1: '01', 2: '02', 3: '04' };
+
 /**
  * Consecutivo del receptor: 20 posiciones.
  * sucursal(3) + terminal(5) + tipoDoc(2) + numero(10)
@@ -72,6 +76,7 @@ export function construirMensajeReceptor({
 
   doc.ele('MontoTotalImpuesto').txt(monto(comprobante.total_impuesto)).up();
   doc.ele('CodigoActividad').txt(empresa.codigo_actividad || '').up();
+  doc.ele('CondicionImpuesto').txt(CONDICION_IMPUESTO[mensaje]).up();
 
   // Cuanto del IVA soportado se acredita el negocio
   doc.ele('MontoTotalImpuestoAcreditar').txt(monto(montoIvaAcreditar)).up();

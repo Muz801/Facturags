@@ -2,9 +2,9 @@ import QRCode from 'qrcode';
 import { query, transaction } from '../config/db.js';
 import { asyncHandler, ok, fail } from '../utils/http.js';
 import {
-  generarClave, generarConsecutivo, construirXML,
-  obtenerToken, enviarAHacienda, cargarConfig,
+  generarClave, generarConsecutivo, construirXML, cargarConfig,
 } from '../services/facturaElectronica.js';
+import { transmitir, consultarComprobante, revisarConfig } from '../services/haciendaEnvio.js';
 import { enviarComprobante } from '../services/mailer.js';
 
 const TIPO_DOC = { factura_electronica: '01', tiquete_electronico: '04' };
@@ -12,8 +12,14 @@ const TIPO_DOC = { factura_electronica: '01', tiquete_electronico: '04' };
 // ---- Listado de ventas con filtros ----
 export const listar = asyncHandler(async (req, res) => {
   const { desde, hasta, estado, tipo } = req.query;
+  // No traemos fe_xml (LONGTEXT) en el listado: pesa mucho por fila.
+  // Solo un flag para saber si hay XML descargable.
   let sql = `
-    SELECT v.*, c.nombre AS cliente_nombre, u.nombre AS usuario_nombre
+    SELECT v.id, v.numero, v.cliente_id, v.usuario_id, v.fecha, v.subtotal, v.descuento,
+           v.impuesto, v.total, v.metodo_pago, v.condicion_venta, v.tipo_comprobante,
+           v.estado, v.fe_clave, v.fe_consecutivo, v.fe_estado, v.fe_enviado_at, v.notas,
+           (v.fe_xml IS NOT NULL AND v.fe_xml <> '') AS fe_xml,
+           c.nombre AS cliente_nombre, u.nombre AS usuario_nombre
     FROM ventas v
     LEFT JOIN clientes c ON c.id = v.cliente_id
     LEFT JOIN usuarios u ON u.id = v.usuario_id
@@ -148,7 +154,7 @@ async function emitirFE(ventaId, tipo, datos) {
     condicionVenta: datos.condicion_venta, metodoPago: datos.metodo_pago,
   });
 
-  // Incrementa el consecutivo
+  // Incrementa el consecutivo (se consume aunque el envio falle: no se repite)
   await query(`UPDATE config_hacienda SET ${campo} = ${campo} + 1 WHERE id = :id`, { id: cfg.id });
 
   // Guarda XML y clave en la venta
@@ -157,41 +163,38 @@ async function emitirFE(ventaId, tipo, datos) {
     { clave, cons: consecutivo, xml, est: 'generado', id: ventaId }
   );
 
-  // ====================================================================
-  //  PUNTO DE FIRMA DIGITAL (XAdES-EPES con la llave .p12)
-  //  En SANDBOX puedes quedarte aqui: ya tienes XML + clave + consecutivo,
-  //  suficiente para generar el PDF y hacer demos completas.
-  //  Para enviar a Hacienda de verdad, firma el XML con la llave .p12
-  //  (ver README, seccion "Firma digital") y luego descomenta el envio:
-  // ====================================================================
-  /*
-  try {
-    const xmlFirmado = await firmarXML(xml, cfg);  // implementar con node-xades o microservicio
-    const token = await obtenerToken(cfg);
-    const resp = await enviarAHacienda({
-      cfg, token, clave,
-      fechaEmision: new Date().toISOString(),
-      emisor: { tipoIdentificacion: empresa.tipo_identificacion, numeroIdentificacion: empresa.identificacion },
-      receptor: cliente ? { tipoIdentificacion: cliente.tipo_identificacion, numeroIdentificacion: cliente.identificacion } : undefined,
-      xmlFirmadoBase64: Buffer.from(xmlFirmado).toString('base64'),
-    });
-    const estado = resp.status === 202 ? 'enviado' : 'error';
+  // Si falta algo para transmitir (llave, credenciales), lo dejamos generado
+  // con el motivo, sin romper la venta: el POS tiene que seguir cobrando.
+  const problema = revisarConfig(cfg);
+  if (problema) {
     await query('UPDATE ventas SET fe_estado = :est, fe_respuesta = :resp WHERE id = :id',
-      { est: estado, resp: resp.body, id: ventaId });
-    return { estado, clave, consecutivo, respuesta: resp.body };
+      { est: 'generado', resp: problema, id: ventaId });
+    return { estado: 'generado', clave, consecutivo, mensaje: problema, ambiente: cfg.ambiente };
+  }
+
+  // Firma XAdES-EPES + envio a Hacienda
+  try {
+    const r = await transmitir({
+      cfg, xml, clave,
+      emisor: {
+        tipoIdentificacion: empresa.tipo_identificacion || '01',
+        numeroIdentificacion: String(empresa.identificacion).replace(/\D/g, ''),
+      },
+      receptor: cliente?.identificacion ? {
+        tipoIdentificacion: cliente.tipo_identificacion || '01',
+        numeroIdentificacion: String(cliente.identificacion).replace(/\D/g, ''),
+      } : undefined,
+    });
+    // Se guarda el XML FIRMADO: es el documento con valor legal (retencion 5 años)
+    const xmlFirmado = Buffer.from(r.xmlFirmado, 'base64').toString('utf8');
+    await query('UPDATE ventas SET fe_estado = :est, fe_respuesta = :resp, fe_xml = :xml, fe_enviado_at = NOW() WHERE id = :id',
+      { est: r.estado, resp: r.respuesta, xml: xmlFirmado, id: ventaId });
+    return { estado: r.estado, clave, consecutivo, http_status: r.httpStatus, respuesta: r.respuesta, ambiente: cfg.ambiente };
   } catch (err) {
     await query('UPDATE ventas SET fe_estado = :est, fe_respuesta = :resp WHERE id = :id',
       { est: 'error', resp: err.message, id: ventaId });
-    return { estado: 'error', clave, consecutivo, mensaje: err.message };
+    return { estado: 'error', clave, consecutivo, mensaje: err.message, ambiente: cfg.ambiente };
   }
-  */
-
-  return {
-    estado: 'generado',
-    clave, consecutivo,
-    mensaje: 'XML v4.4 generado correctamente (modo demo/sandbox sin firma). Listo para PDF.',
-    ambiente: cfg.ambiente,
-  };
 }
 
 // ---- Anular venta (devuelve stock) ----
@@ -216,6 +219,69 @@ export const anular = asyncHandler(async (req, res) => {
     await conn.execute('UPDATE ventas SET estado = "anulada" WHERE id = ?', [req.params.id]);
   });
   return ok(res, { mensaje: 'Venta anulada y stock devuelto' });
+});
+
+// ---- Reintentar el envio de una venta que quedo generada o con error ----
+export const reenviarFE = asyncHandler(async (req, res) => {
+  const venta = (await query('SELECT * FROM ventas WHERE id = :id', { id: req.params.id }))[0];
+  if (!venta) return fail(res, 'Venta no encontrada', 404);
+  if (!venta.fe_xml) return fail(res, 'Esta venta no es factura ni tiquete electronico.');
+  if (venta.fe_estado === 'aceptado') return fail(res, 'Esta factura ya fue aceptada por Hacienda.');
+
+  const cfg = await cargarConfig();
+  const problema = revisarConfig(cfg);
+  if (problema) return fail(res, problema, 409);
+
+  const empresa = (await query('SELECT * FROM empresa ORDER BY id LIMIT 1'))[0];
+  let cliente = null;
+  if (venta.cliente_id) cliente = (await query('SELECT * FROM clientes WHERE id = :id', { id: venta.cliente_id }))[0];
+
+  try {
+    const r = await transmitir({
+      cfg, xml: venta.fe_xml, clave: venta.fe_clave,
+      emisor: {
+        tipoIdentificacion: empresa.tipo_identificacion || '01',
+        numeroIdentificacion: String(empresa.identificacion).replace(/\D/g, ''),
+      },
+      receptor: cliente?.identificacion ? {
+        tipoIdentificacion: cliente.tipo_identificacion || '01',
+        numeroIdentificacion: String(cliente.identificacion).replace(/\D/g, ''),
+      } : undefined,
+    });
+    const xmlFirmado = Buffer.from(r.xmlFirmado, 'base64').toString('utf8');
+    await query('UPDATE ventas SET fe_estado = :est, fe_respuesta = :resp, fe_xml = :xml, fe_enviado_at = NOW() WHERE id = :id',
+      { est: r.estado, resp: r.respuesta, xml: xmlFirmado, id: venta.id });
+    return ok(res, { estado: r.estado, http_status: r.httpStatus, respuesta: r.respuesta });
+  } catch (err) {
+    await query('UPDATE ventas SET fe_estado = :est, fe_respuesta = :resp WHERE id = :id',
+      { est: 'error', resp: err.message, id: venta.id });
+    return fail(res, `No se pudo enviar a Hacienda: ${err.message}`, 502);
+  }
+});
+
+// ---- Consultar en Hacienda como quedo la factura ----
+export const consultarEstadoFE = asyncHandler(async (req, res) => {
+  const venta = (await query('SELECT * FROM ventas WHERE id = :id', { id: req.params.id }))[0];
+  if (!venta) return fail(res, 'Venta no encontrada', 404);
+  if (!venta.fe_clave) return fail(res, 'Esta venta no tiene factura electronica.');
+
+  const cfg = await cargarConfig();
+  const problema = revisarConfig(cfg);
+  if (problema) return fail(res, problema, 409);
+
+  const r = await consultarComprobante({ cfg, clave: venta.fe_clave });
+  await query('UPDATE ventas SET fe_estado = :est, fe_respuesta = :resp WHERE id = :id',
+    { est: r.estado, resp: r.respuestaXml || JSON.stringify(r.crudo), id: venta.id });
+  return ok(res, { fe_estado: r.estado, ind_estado: r.indEstado, respuesta: r.respuestaXml });
+});
+
+// ---- Descargar el XML de la factura ----
+export const descargarXml = asyncHandler(async (req, res) => {
+  const rows = await query('SELECT fe_clave, fe_xml FROM ventas WHERE id = :id', { id: req.params.id });
+  if (!rows[0]?.fe_xml) return fail(res, 'Esta venta no tiene XML generado.', 404);
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${rows[0].fe_clave}.xml"`);
+  return res.send(rows[0].fe_xml);
 });
 
 // ---- Generar QR del comprobante ----
